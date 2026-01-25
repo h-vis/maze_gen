@@ -46,24 +46,23 @@ def generate_maze(width: int, height: int, seed: int | None = None) -> Maze:
 
     return Maze(width, height, cells)
 
-def render_maze_image_rect_walls(
-    maze: Maze,
+def render_maze_image_joined(
+    maze,
     cell_size: int = 28,
     margin: int = 24,
-    wall: int = 4,          # 壁の太さ(px)
-    aa_scale: int = 1,      # 2〜4にすると縮小AAでさらに綺麗
+    wall: int = 4,
+    aa_scale: int = 1,
     bg=(255, 255, 255),
     fg=(0, 0, 0),
     entrance=(0, 0),
-    entrance_side="left",   # left/top
+    entrance_side="left",
     exit=None,
-    exit_side="right",      # right/bottom
-) -> Image.Image:
+    exit_side="right",
+):
     w, h = maze.width, maze.height
     if exit is None:
         exit = (w - 1, h - 1)
 
-    # AA用に全体をスケールして描画 → 最後に縮小
     cs = cell_size * aa_scale
     mg = margin * aa_scale
     wt = wall * aa_scale
@@ -73,65 +72,112 @@ def render_maze_image_rect_walls(
     img = Image.new("RGB", (img_w, img_h), bg)
     draw = ImageDraw.Draw(img)
 
-    def cell_origin(x, y):
-        return mg + x * cs, mg + y * cs
+    # 壁の矩形を引く（伸ばさない）
+    def fill_rect(x0, y0, x1, y1, color=fg):
+        # x1,y1 は「含む」座標として扱う（Pillowのrectangle仕様に合わせる）
+        draw.rectangle([x0, y0, x1, y1], fill=color)
 
-    def rect(x0, y0, x1, y1):
-        # PILは右下含むので、細い隙間を防ぐために整数のまま描く
-        draw.rectangle([x0, y0, x1, y1], fill=fg)
+    # グリッド線（セル境界）のピクセル座標
+    # grid_x[i] = 左端から iセル境界のx
+    grid_x = [mg + i * cs for i in range(w + 1)]
+    grid_y = [mg + j * cs for j in range(h + 1)]
 
-    # 外枠：4辺を「塗り長方形」で描く（角が綺麗）
-    left = mg
-    top = mg
-    right = mg + w * cs
-    bottom = mg + h * cs
-    # 上
-    rect(left, top, right, top + wt - 1)
-    # 下
-    rect(left, bottom - wt, right, bottom - 1)
-    # 左
-    rect(left, top, left + wt - 1, bottom - 1)
-    # 右
-    rect(right - wt, top, right - 1, bottom - 1)
+    # 壁の存在を「格子線上のセグメント」として保持
+    # v[y][x] : x番目の縦グリッド線上で、y→y+1 の縦壁があるか (0<=y<h, 0<=x<=w)
+    # hseg[y][x] : y番目の横グリッド線上で、x→x+1 の横壁があるか (0<=y<=h, 0<=x<w)
+    v = [[False for _ in range(w + 1)] for __ in range(h)]
+    hs = [[False for _ in range(w)] for __ in range(h + 1)]
 
-    # 内壁：各セルの「東」「南」だけ描く（重複回避）
+    # 外周は全部壁
+    for y in range(h):
+        v[y][0] = True
+        v[y][w] = True
+    for x in range(w):
+        hs[0][x] = True
+        hs[h][x] = True
+
+    # 内壁：通路が無いところが壁
+    # 東壁（セル(x,y)の右境界）：通路Eが無ければ縦壁
+    # 南壁（セル(x,y)の下境界）：通路Sが無ければ横壁
+    # 西/北は隣セルの東/南で表現されるのでここでは不要
     for y in range(h):
         for x in range(w):
-            x0, y0 = cell_origin(x, y)
-            x1, y1 = x0 + cs, y0 + cs
+            if not (maze.cells[y][x] & 4):  # E
+                v[y][x + 1] = True
+            if not (maze.cells[y][x] & 2):  # S
+                hs[y + 1][x] = True
 
-            # 東壁（x1 位置に縦壁）
-            if not (maze.cells[y][x] & E):
-                rect(x1 - wt, y0, x1 - 1, y1 - 1)
+    # 入口/出口の穴：外周壁フラグを落とす（描画そのものを出さない）
+    ex, ey = entrance
+    ox, oy = exit
 
-            # 南壁（y1 位置に横壁）
-            if not (maze.cells[y][x] & S):
-                rect(x0, y1 - wt, x1 - 1, y1 - 1)
-
-    # 入口/出口の穴を「背景色の長方形」で開ける（細線が残りにくい）
-    def carve_hole(cell, side):
+    def open_hole(cell, side):
         cx, cy = cell
-        x0, y0 = cell_origin(cx, cy)
-        x1, y1 = x0 + cs, y0 + cs
-
-        # 穴は壁厚より少し大きめに消す（ゴール付近の細線対策）
-        pad = wt + 1
-
         if side == "left":
-            draw.rectangle([x0 - pad, y0 + wt, x0 + pad, y1 - wt], fill=bg)
+            v[cy][0] = False
         elif side == "right":
-            draw.rectangle([x1 - pad, y0 + wt, x1 + pad, y1 - wt], fill=bg)
+            v[cy][w] = False
         elif side == "top":
-            draw.rectangle([x0 + wt, y0 - pad, x1 - wt, y0 + pad], fill=bg)
+            hs[0][cx] = False
         elif side == "bottom":
-            draw.rectangle([x0 + wt, y1 - pad, x1 - wt, y1 + pad], fill=bg)
+            hs[h][cx] = False
         else:
             raise ValueError("side must be left/right/top/bottom")
 
-    carve_hole(entrance, entrance_side)
-    carve_hole(exit, exit_side)
+    open_hole(entrance, entrance_side)
+    open_hole(exit, exit_side)
 
-    # AA縮小
+    # まずセグメントを描く（縦壁・横壁）
+    # 縦壁：x=grid_x[xi] 上に太さwtで、y0..y1
+    half_l = wt // 2
+    half_r = wt - half_l  # 左右で合計wtになるように
+
+    # vertical segments
+    for y in range(h):
+        y0 = grid_y[y]
+        y1 = grid_y[y + 1]
+        for xi in range(w + 1):
+            if not v[y][xi]:
+                continue
+            x = grid_x[xi]
+            fill_rect(x - half_l, y0, x + half_r - 1, y1 - 1, fg)
+
+    # horizontal segments
+    for yi in range(h + 1):
+        y = grid_y[yi]
+        for x in range(w):
+            if not hs[yi][x]:
+                continue
+            x0 = grid_x[x]
+            x1 = grid_x[x + 1]
+            fill_rect(x0, y - half_l, x1 - 1, y + half_r - 1, fg)
+
+    # ここが肝：交点（格子点）に「角埋めスクエア」を追加して欠けを完全に潰す
+    # 「上下左右のどれかに壁がある交点」だけ塗る
+    for yi in range(h + 1):
+        for xi in range(w + 1):
+            touches = False
+
+            # この交点に接する縦壁（上側/下側）
+            if yi > 0 and v[yi - 1][xi]:
+                touches = True
+            if yi < h and v[yi][xi]:
+                touches = True
+
+            # この交点に接する横壁（左側/右側）
+            if xi > 0 and hs[yi][xi - 1]:
+                touches = True
+            if xi < w and hs[yi][xi]:
+                touches = True
+
+            if not touches:
+                continue
+
+            x = grid_x[xi]
+            y = grid_y[yi]
+            fill_rect(x - half_l, y - half_l, x + half_r - 1, y + half_r - 1, fg)
+
+    # AA縮小（任意）
     if aa_scale != 1:
         img = img.resize((img_w // aa_scale, img_h // aa_scale), resample=Image.Resampling.LANCZOS)
 
@@ -150,7 +196,7 @@ def main():
     args = ap.parse_args()
 
     m = generate_maze(args.width, args.height, seed=args.seed)
-    img = render_maze_image_rect_walls(
+    img = render_maze_image_joined(
         m,
         cell_size=args.cell,
         margin=args.margin,

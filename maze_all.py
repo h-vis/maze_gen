@@ -531,7 +531,7 @@ def main():
     ap.add_argument("--line-width", type=int, default=5)
     ap.add_argument("--circle-aa", type=int, default=3)
     ap.add_argument("--blank-extra", type=int, default=18)
-    ap.add_argument("--entrance-sector", type=int, default=0)
+    ap.add_argument("--entrance-sector", type=int, default=24)
     ap.add_argument("--exit-sector", type=int, default=None)
 
     args = ap.parse_args()

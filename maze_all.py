@@ -25,6 +25,8 @@ def save_image_as_a4_pdf(
     start_center_px: tuple[float, float] | None = None,  # img上(px) 左上原点
     goal_center_px: tuple[float, float] | None = None,
     icon_mm: float = 12.0,  # A4上で読みやすい固定サイズ（10〜16mm推奨）
+    logo_path: str | None = None,
+    logo_width_mm: float = 35.0,   # A4で見やすい横幅
 ):
     page_w, page_h = A4
     margin = margin_mm * mm
@@ -59,17 +61,45 @@ def save_image_as_a4_pdf(
         pdf_x = x + px * scale
         pdf_y = y + (img_h_px - py) * scale  # PDF：左下原点へ変換
 
+        # 画像のアスペクト比を維持して描画
+        iw, ih = Image.open(icon_path).size
+        target_h = icon_mm * mm                 # 「高さ」を固定（見やすさが安定）
+        target_w = target_h * (iw / ih)         # 比率維持
+
         c.drawImage(
             icon,
-            pdf_x - icon_size_pt / 2,
-            pdf_y - icon_size_pt / 2,
-            width=icon_size_pt,
-            height=icon_size_pt,
+            pdf_x - target_w/2,
+            pdf_y - target_h/2,
+            width=target_w,
+            height=target_h,
+            mask="auto",
+        )
+
+    if logo_path:
+        logo = ImageReader(logo_path)
+        logo_w_pt = logo_width_mm * mm
+
+        # 画像のアスペクト比を保つ
+        iw, ih = Image.open(logo_path).size
+        logo_h_pt = logo_w_pt * (ih / iw)
+
+        # 上中央（余白内）
+        logo_x = (page_w - logo_w_pt) / 2
+        logo_y = page_h - margin - logo_h_pt
+
+        c.drawImage(
+            logo,
+            logo_x,
+            logo_y,
+            width=logo_w_pt,
+            height=logo_h_pt,
             mask="auto",
         )
 
     draw_icon_on_pdf(start_icon_path, start_center_px)
     draw_icon_on_pdf(goal_icon_path, goal_center_px)
+
+
 
     c.showPage()
     c.save()
@@ -444,40 +474,38 @@ def render_circular_maze_png(
                 continue
             ang = 2 * pi * (tb / K)
 
-            # 内側：最内リングは内側に伸ばさない
-            r0_draw = r0 if (r == s0) else (r0 - half)
-            # 外側：最外リングは外側に伸ばさない
-            r1_draw = r1 if (r == R - 1) else (r1 + half)
+            r0_draw = r0
+            r1_draw = r1
 
             p0 = p(max(0.0, r0_draw), ang)
             p1 = p(r1_draw, ang)
             draw.line([p0, p1], fill=fg, width=int(lw))
 
-    # ジョイント（回転正方形）
-    arc_touch = [[False for _ in range(K)] for __ in range(R + 1)]
-    rad_touch = [[False for _ in range(K)] for __ in range(R + 1)]
+    # # ジョイント（回転正方形）
+    # arc_touch = [[False for _ in range(K)] for __ in range(R + 1)]
+    # rad_touch = [[False for _ in range(K)] for __ in range(R + 1)]
 
-    for rb in range(s0, R + 1):
-        for t in range(K):
-            if arc_wall[rb][t]:
-                arc_touch[rb][t] = True
-                arc_touch[rb][(t + 1) % K] = True
+    # for rb in range(s0, R + 1):
+    #     for t in range(K):
+    #         if arc_wall[rb][t]:
+    #             arc_touch[rb][t] = True
+    #             arc_touch[rb][(t + 1) % K] = True
 
-    for r in range(s0, R):
-        for tb in range(K):
-            if radial_wall[r][tb]:
-                rad_touch[r][tb] = True
-                rad_touch[r + 1][tb] = True
+    # for r in range(s0, R):
+    #     for tb in range(K):
+    #         if radial_wall[r][tb]:
+    #             rad_touch[r][tb] = True
+    #             rad_touch[r + 1][tb] = True
 
-    jhalf = (lw / 2.0) * 0.78
-    for rb in range(s0, R + 1):
-        radius = blank_extra + rb * rt
-        for tb in range(K):
-            if not (arc_touch[rb][tb] and rad_touch[rb][tb]):
-                continue
-            ang = 2 * pi * (tb / K)
-            x, y = p(radius, ang)
-            _draw_rotated_square(draw, x, y, ang, jhalf, fg)
+    # jhalf = (lw / 2.0) * 0.78
+    # for rb in range(s0, R + 1):
+    #     radius = blank_extra + rb * rt
+    #     for tb in range(K):
+    #         if not (arc_touch[rb][tb] and rad_touch[rb][tb]):
+    #             continue
+    #         ang = 2 * pi * (tb / K)
+    #         x, y = p(radius, ang)
+    #         _draw_rotated_square(draw, x, y, ang, jhalf, fg)
 
     # --- START/GOAL アイコン中心(px)（PNGに貼らず、PDFで固定mm描画） ---
     icon_offset = lw * 3  # 外周の少し外
@@ -591,6 +619,8 @@ def main():
         start_center_px=start_center,
         goal_center_px=goal_center,
         icon_mm=args.icon_mm,
+        logo_path="image/logo.png",
+        logo_width_mm=120.0, 
     )
     print(f"Saved A4 PDF: {pdf_path}")
 

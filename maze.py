@@ -3,6 +3,14 @@ import argparse
 from dataclasses import dataclass
 from PIL import Image, ImageDraw
 
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from datetime import datetime
+
+
+
 # ---- 迷路表現（通路ビット） ----
 N, S, E, W = 1, 2, 4, 8
 DX = {E: 1, W: -1, N: 0, S: 0}
@@ -183,6 +191,47 @@ def render_maze_image_joined(
 
     return img
 
+def save_image_as_a4_pdf(
+    img,                 # PIL.Image
+    out_pdf_path: str,
+    margin_mm: float = 15.0,   # A4余白
+):
+    """
+    PIL.Image を A4 1ページのPDFとして保存する。
+    画像は縦横比を保って中央配置。
+    """
+    page_w, page_h = A4  # pt
+    margin = margin_mm * mm
+
+    c = canvas.Canvas(out_pdf_path, pagesize=A4)
+
+    img_w_px, img_h_px = img.size
+
+    # PDF上で使える最大サイズ（pt）
+    max_w = page_w - margin * 2
+    max_h = page_h - margin * 2
+
+    # px → pt のスケール（縦横比維持）
+    scale = min(max_w / img_w_px, max_h / img_h_px)
+
+    draw_w = img_w_px * scale
+    draw_h = img_h_px * scale
+
+    x = (page_w - draw_w) / 2
+    y = (page_h - draw_h) / 2
+
+    c.drawImage(
+        ImageReader(img),
+        x, y,
+        width=draw_w,
+        height=draw_h,
+        preserveAspectRatio=True,
+        mask='auto'
+    )
+
+    c.showPage()
+    c.save()
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--width", type=int, default=30)
@@ -193,6 +242,7 @@ def main():
     ap.add_argument("--wall", type=int, default=4)
     ap.add_argument("--aa", type=int, default=1, help="anti-alias scale (2-4 recommended for nicer corners)")
     ap.add_argument("--out", type=str, default="maze.png")
+    ap.add_argument("--pdf", type=str, default=None, help="output A4 PDF path")
     args = ap.parse_args()
 
     m = generate_maze(args.width, args.height, seed=args.seed)
@@ -209,6 +259,20 @@ def main():
     )
     img.save(args.out)
     print(f"Saved: {args.out}")
+
+        
+    # PDF保存（指定がなければ日時で自動生成）
+    pdf_path = args.pdf
+    if pdf_path is None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pdf_path = f"maze_{ts}.pdf"
+
+    save_image_as_a4_pdf(
+        img,
+        pdf_path,
+        margin_mm=15.0
+    )
+    print(f"Saved A4 PDF: {pdf_path}")
 
 if __name__ == "__main__":
     main()

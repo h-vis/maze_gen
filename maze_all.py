@@ -19,7 +19,7 @@ from reportlab.lib.utils import ImageReader
 def save_image_as_a4_pdf(
     img: Image.Image,
     out_pdf_path: str,
-    margin_mm: float = 15.0,
+    margin_mm: float = 20.0,
     start_icon_path: str | None = None,
     goal_icon_path: str | None = None,
     start_center_px: tuple[float, float] | None = None,  # img上(px) 左上原点
@@ -568,7 +568,7 @@ def main():
     ap.add_argument("--start-icon", type=str, default="image/start.png")
     ap.add_argument("--goal-icon", type=str, default="image/goal.png")
     ap.add_argument("--icon-mm", type=float, default=12.0, help="START/GOAL icon size on A4 in mm (10-16 recommended)")
-    ap.add_argument("--pdf-margin-mm", type=float, default=15.0)
+    ap.add_argument("--pdf-margin-mm", type=float, default=20.0)
 
     # 四角迷路パラメータ
     ap.add_argument("--width", type=int, default=30)
@@ -651,8 +651,8 @@ def main():
         icon_mm=args.icon_mm,
         logo_path="image/logo.png",
         logo_width_mm=120.0, 
-        start_outward_unit=(-1.0, 0.0),  # rect: 左外
-        goal_outward_unit=( 1.0, 0.0),  # rect: 右外
+        start_outward_unit=(-2.0, 0.0),  # rect: 左外
+        goal_outward_unit=(7.0, 0.0),  # rect: 右外
     )
     print(f"Saved A4 PDF: {pdf_path}")
 

@@ -24,9 +24,13 @@ def save_image_as_a4_pdf(
     goal_icon_path: str | None = None,
     start_center_px: tuple[float, float] | None = None,  # img上(px) 左上原点
     goal_center_px: tuple[float, float] | None = None,
-    icon_mm: float = 12.0,  # A4上で読みやすい固定サイズ（10〜16mm推奨）
+    icon_mm: float = 10.0,  # A4上で読みやすい固定サイズ（10〜16mm推奨）
     logo_path: str | None = None,
     logo_width_mm: float = 35.0,   # A4で見やすい横幅
+    maze_center_px: tuple[float, float] | None = None,  # 円形迷路の中心(px) 画像座標
+    icon_gap_mm: float = -10.0,                           # 迷路とアイコンの隙間
+    start_outward_unit: tuple[float, float] | None = None,
+    goal_outward_unit: tuple[float, float] | None = None,
 ):
     page_w, page_h = A4
     margin = margin_mm * mm
@@ -51,29 +55,54 @@ def save_image_as_a4_pdf(
         mask="auto",
     )
 
-    def draw_icon_on_pdf(icon_path: str | None, center_px: tuple[float, float] | None):
-        if not icon_path or center_px is None:
+    def draw_icon_on_pdf(
+        icon_path: str | None,
+        anchor_px: tuple[float, float] | None,
+        outward_unit: tuple[float, float] | None,
+    ):
+        if not icon_path or anchor_px is None:
             return
-        icon = ImageReader(icon_path)
-        icon_size_pt = icon_mm * mm
 
-        px, py = center_px  # img座標：左上原点
-        pdf_x = x + px * scale
-        pdf_y = y + (img_h_px - py) * scale  # PDF：左下原点へ変換
+        ax, ay = anchor_px  # img座標（左上原点）
 
-        # 画像のアスペクト比を維持して描画
+        # アスペクト比維持：高さを固定
         iw, ih = Image.open(icon_path).size
-        target_h = icon_mm * mm                 # 「高さ」を固定（見やすさが安定）
-        target_w = target_h * (iw / ih)         # 比率維持
+        target_h = icon_mm * mm
+        target_w = target_h * (iw / ih)
+
+        # 外向きベクトルを決める（rectは引数、circleは中心から計算）
+        ux = uy = 0.0
+        if outward_unit is not None:
+            ux, uy = outward_unit
+        elif maze_center_px is not None:
+            cx_img, cy_img = maze_center_px
+            vx = ax - cx_img
+            vy = ay - cy_img
+            norm = (vx * vx + vy * vy) ** 0.5
+            if norm > 1e-6:
+                ux = vx / norm
+                uy = vy / norm
+
+        # 押し出し量（pt→pxへ）
+        half_ext_pt = max(target_w, target_h) / 2
+        push_px = (half_ext_pt + icon_gap_mm * mm) / scale
+
+        # outwardが無い（ux=uy=0）のときは押し出しゼロ
+        px = ax + ux * push_px
+        py = ay + uy * push_px
+
+        pdf_x = x + px * scale
+        pdf_y = y + (img_h_px - py) * scale
 
         c.drawImage(
-            icon,
-            pdf_x - target_w/2,
-            pdf_y - target_h/2,
+            ImageReader(icon_path),
+            pdf_x - target_w / 2,
+            pdf_y - target_h / 2,
             width=target_w,
             height=target_h,
             mask="auto",
         )
+    
 
     if logo_path:
         logo = ImageReader(logo_path)
@@ -96,10 +125,8 @@ def save_image_as_a4_pdf(
             mask="auto",
         )
 
-    draw_icon_on_pdf(start_icon_path, start_center_px)
-    draw_icon_on_pdf(goal_icon_path, goal_center_px)
-
-
+    draw_icon_on_pdf(start_icon_path, start_center_px, start_outward_unit)
+    draw_icon_on_pdf(goal_icon_path,  goal_center_px,  goal_outward_unit)
 
     c.showPage()
     c.save()
@@ -522,7 +549,8 @@ def render_circular_maze_png(
         start_center = (start_center[0] / aa_scale, start_center[1] / aa_scale)
         goal_center  = (goal_center[0] / aa_scale,  goal_center[1]  / aa_scale)
 
-    return img, start_center, goal_center
+    return img, start_center, goal_center, (cx/aa_scale, cy/aa_scale)
+
 
 
 # =========================================================
@@ -563,6 +591,7 @@ def main():
     ap.add_argument("--exit-sector", type=int, default=None)
 
     args = ap.parse_args()
+    maze_center = None
 
     if args.shape == "rect":
         m = generate_rect_maze(args.width, args.height, seed=args.seed)
@@ -589,7 +618,7 @@ def main():
             seed=args.seed,
             start_sector=args.entrance_sector,
         )
-        img, start_center, goal_center = render_circular_maze_png(
+        img, start_center, goal_center, maze_center = render_circular_maze_png(
             maze,
             ring_thickness_px=args.ring_thickness,
             margin_px=args.circle_margin,
@@ -618,9 +647,12 @@ def main():
         goal_icon_path=args.goal_icon,
         start_center_px=start_center,
         goal_center_px=goal_center,
+        maze_center_px=maze_center,
         icon_mm=args.icon_mm,
         logo_path="image/logo.png",
         logo_width_mm=120.0, 
+        start_outward_unit=(-1.0, 0.0),  # rect: 左外
+        goal_outward_unit=( 1.0, 0.0),  # rect: 右外
     )
     print(f"Saved A4 PDF: {pdf_path}")
 

@@ -31,6 +31,18 @@ def save_image_as_a4_pdf(
     icon_gap_mm: float = -10.0,                           # 迷路とアイコンの隙間
     start_outward_unit: tuple[float, float] | None = None,
     goal_outward_unit: tuple[float, float] | None = None,
+
+    title_rules: bool = True,
+    title_rule_width_pt: float = 0.7,     # 線の太さ（0.5〜1.0くらいが上品）
+    title_rule_inset_mm: float = 8.0,     # 余白からさらに内側に入れる量
+    title_rule_gap_mm: float = 2.0,       # ロゴと線の間隔
+
+    bottom_art_path: str | None = None,
+    bottom_art_width_mm: float = 170.0,   # 余白内に収まる横幅（A4幅210-左右余白40=170）
+    bottom_art_y_mm: float = 18.0,        # ページ下からの距離
+    name_path: str | None = None,
+    name_width_mm: float = 160.0,     # 余白内に収まる幅（170mmより少し小さめが上品）
+    name_gap_mm: float = 3.0,         # ロゴ（下線）から名前欄までの間隔
 ):
     page_w, page_h = A4
     margin = margin_mm * mm
@@ -103,6 +115,25 @@ def save_image_as_a4_pdf(
             mask="auto",
         )
     
+    if bottom_art_path:
+        bw_pt = bottom_art_width_mm * mm
+
+        # アスペクト比保持
+        iw, ih = Image.open(bottom_art_path).size
+        bh_pt = bw_pt * (ih / iw)
+
+        # 横中央、下から bottom_art_y_mm の位置
+        bx = (page_w - bw_pt) / 2
+        by = bottom_art_y_mm * mm
+
+        c.drawImage(
+            ImageReader(bottom_art_path),
+            bx,
+            by,
+            width=bw_pt,
+            height=bh_pt,
+            mask="auto",
+        )
 
     if logo_path:
         logo = ImageReader(logo_path)
@@ -116,6 +147,26 @@ def save_image_as_a4_pdf(
         logo_x = (page_w - logo_w_pt) / 2
         logo_y = page_h - margin - logo_h_pt
 
+
+
+        if title_rules:
+            inset = title_rule_inset_mm * mm
+            gap = title_rule_gap_mm * mm
+
+            x0 = margin + inset
+            x1 = page_w - margin - inset
+
+            y_top = logo_y + logo_h_pt + gap
+            y_bot = logo_y - gap
+
+            c.saveState()
+            c.setLineWidth(title_rule_width_pt)
+            # c.setStrokeColorRGB(0, 0, 0)  # 必要なら（通常は黒のままでOK）
+            c.line(x0, y_top, x1, y_top)
+            c.line(x0, y_bot, x1, y_bot)
+            c.restoreState()
+
+        # ロゴ本体
         c.drawImage(
             logo,
             logo_x,
@@ -127,6 +178,40 @@ def save_image_as_a4_pdf(
 
     draw_icon_on_pdf(start_icon_path, start_center_px, start_outward_unit)
     draw_icon_on_pdf(goal_icon_path,  goal_center_px,  goal_outward_unit)
+
+    if name_path:
+        nw_pt = name_width_mm * mm
+
+        niw, nih = Image.open(name_path).size
+        nh_pt = nw_pt * (nih / niw)
+
+        # 「下側の水平線」があるならそれを基準に少し下へ。
+        # なければロゴの下端を基準に下へ。
+        gap_pt = float(name_gap_mm) * mm
+
+        if title_rules:
+            # 下側ラインのY座標（先ほど計算した y_bot を再利用できるようにしておく）
+            # ここでは y_bot を再計算して一致させる（確実）
+            inset = float(title_rule_inset_mm) * mm
+            gap_rule = float(title_rule_gap_mm) * mm
+            y_bot_local = logo_y - gap_rule
+            top_y = y_bot_local - gap_pt  # 名前欄の上端基準
+        else:
+            top_y = logo_y - gap_pt
+
+        right_inset_mm = 2.0  # 右端から少し内側（お好みで）
+        name_x = page_w - margin - (right_inset_mm * mm) - nw_pt
+        name_y = top_y - nh_pt
+
+
+        c.drawImage(
+            ImageReader(name_path),
+            name_x,
+            name_y,
+            width=nw_pt,
+            height=nh_pt,
+            mask="auto",
+        )
 
     c.showPage()
     c.save()
@@ -567,7 +652,7 @@ def main():
     ap.add_argument("--pdf", type=str, default=None, help="output A4 PDF path (auto if omitted)")
     ap.add_argument("--start-icon", type=str, default="image/start.png")
     ap.add_argument("--goal-icon", type=str, default="image/goal.png")
-    ap.add_argument("--icon-mm", type=float, default=12.0, help="START/GOAL icon size on A4 in mm (10-16 recommended)")
+    ap.add_argument("--icon-mm", type=float, default=10.0, help="START/GOAL icon size on A4 in mm (10-16 recommended)")
     ap.add_argument("--pdf-margin-mm", type=float, default=20.0)
 
     # 四角迷路パラメータ
@@ -651,8 +736,13 @@ def main():
         icon_mm=args.icon_mm,
         logo_path="image/logo.png",
         logo_width_mm=120.0, 
-        start_outward_unit=(-2.0, 0.0),  # rect: 左外
-        goal_outward_unit=(7.0, 0.0),  # rect: 右外
+        start_outward_unit=(-4.0, 0.0),  # rect: 左外
+        goal_outward_unit=(-4.0, 0.0),  # rect: 右外
+        bottom_art_path="image/animal.png",
+        bottom_art_width_mm=170.0,
+        bottom_art_y_mm=10.0,
+        name_width_mm=120.0,
+        name_gap_mm=10.0,
     )
     print(f"Saved A4 PDF: {pdf_path}")
 

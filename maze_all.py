@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from collections import deque
 from math import cos, sin, pi
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
@@ -48,6 +49,20 @@ def save_image_as_a4_pdf(
     margin = margin_mm * mm
     c = canvas.Canvas(out_pdf_path, pagesize=A4)
 
+    def validate_asset(path_str: str | None, label: str) -> str | None:
+        if path_str is None:
+            return None
+        p = Path(path_str)
+        if not p.is_file():
+            raise FileNotFoundError(f"{label} not found: {path_str}")
+        return str(p)
+
+    start_icon_path = validate_asset(start_icon_path, "start icon")
+    goal_icon_path = validate_asset(goal_icon_path, "goal icon")
+    logo_path = validate_asset(logo_path, "logo image")
+    bottom_art_path = validate_asset(bottom_art_path, "bottom art image")
+    name_path = validate_asset(name_path, "name image")
+
     img_w_px, img_h_px = img.size
     max_w = page_w - margin * 2
     max_h = page_h - margin * 2
@@ -78,7 +93,8 @@ def save_image_as_a4_pdf(
         ax, ay = anchor_px  # img座標（左上原点）
 
         # アスペクト比維持：高さを固定
-        iw, ih = Image.open(icon_path).size
+        with Image.open(icon_path) as icon_img:
+            iw, ih = icon_img.size
         target_h = icon_mm * mm
         target_w = target_h * (iw / ih)
 
@@ -119,7 +135,8 @@ def save_image_as_a4_pdf(
         bw_pt = bottom_art_width_mm * mm
 
         # アスペクト比保持
-        iw, ih = Image.open(bottom_art_path).size
+        with Image.open(bottom_art_path) as art_img:
+            iw, ih = art_img.size
         bh_pt = bw_pt * (ih / iw)
 
         # 横中央、下から bottom_art_y_mm の位置
@@ -140,7 +157,8 @@ def save_image_as_a4_pdf(
         logo_w_pt = logo_width_mm * mm
 
         # 画像のアスペクト比を保つ
-        iw, ih = Image.open(logo_path).size
+        with Image.open(logo_path) as logo_img:
+            iw, ih = logo_img.size
         logo_h_pt = logo_w_pt * (ih / iw)
 
         # 上中央（余白内）
@@ -182,7 +200,8 @@ def save_image_as_a4_pdf(
     if name_path:
         nw_pt = name_width_mm * mm
 
-        niw, nih = Image.open(name_path).size
+        with Image.open(name_path) as name_img:
+            niw, nih = name_img.size
         nh_pt = nw_pt * (nih / niw)
 
         # 「下側の水平線」があるならそれを基準に少し下へ。
@@ -723,6 +742,7 @@ def main():
     if pdf_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         pdf_path = f"maze_{args.shape}_{ts}.pdf"
+    rect_icon_outward = (-4.0, 0.0) if args.shape == "rect" else None
 
     save_image_as_a4_pdf(
         img,
@@ -736,8 +756,8 @@ def main():
         icon_mm=args.icon_mm,
         logo_path="image/logo.png",
         logo_width_mm=120.0, 
-        start_outward_unit=(-4.0, 0.0),  # rect: 左外
-        goal_outward_unit=(-4.0, 0.0),  # rect: 右外
+        start_outward_unit=rect_icon_outward,  # circle: None -> use radial outward direction
+        goal_outward_unit=rect_icon_outward,   # circle: None -> use radial outward direction
         bottom_art_path="image/animal.png",
         bottom_art_width_mm=170.0,
         bottom_art_y_mm=10.0,

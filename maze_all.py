@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import random
 from dataclasses import dataclass
 from datetime import datetime
@@ -98,7 +98,7 @@ def save_image_as_a4_pdf(
         target_h = icon_mm * mm
         target_w = target_h * (iw / ih)
 
-        # 外向きベクトルを決める（rectは引数、circleは中心から計算）
+        # 外向きベクトルを決める（rect/triは引数、circleは中心から計算）
         ux = uy = 0.0
         if outward_unit is not None:
             ux, uy = outward_unit
@@ -130,7 +130,7 @@ def save_image_as_a4_pdf(
             height=target_h,
             mask="auto",
         )
-    
+
     if bottom_art_path:
         bw_pt = bottom_art_width_mm * mm
 
@@ -165,8 +165,6 @@ def save_image_as_a4_pdf(
         logo_x = (page_w - logo_w_pt) / 2
         logo_y = page_h - margin - logo_h_pt
 
-
-
         if title_rules:
             inset = title_rule_inset_mm * mm
             gap = title_rule_gap_mm * mm
@@ -179,7 +177,6 @@ def save_image_as_a4_pdf(
 
             c.saveState()
             c.setLineWidth(title_rule_width_pt)
-            # c.setStrokeColorRGB(0, 0, 0)  # 必要なら（通常は黒のままでOK）
             c.line(x0, y_top, x1, y_top)
             c.line(x0, y_bot, x1, y_bot)
             c.restoreState()
@@ -197,31 +194,32 @@ def save_image_as_a4_pdf(
     draw_icon_on_pdf(start_icon_path, start_center_px, start_outward_unit)
     draw_icon_on_pdf(goal_icon_path,  goal_center_px,  goal_outward_unit)
 
-    if name_path:
+    if name_path and logo_path:
         nw_pt = name_width_mm * mm
 
         with Image.open(name_path) as name_img:
             niw, nih = name_img.size
         nh_pt = nw_pt * (nih / niw)
 
-        # 「下側の水平線」があるならそれを基準に少し下へ。
-        # なければロゴの下端を基準に下へ。
         gap_pt = float(name_gap_mm) * mm
 
+        # ロゴ位置を再計算（上のロゴ描画と一致させる）
+        with Image.open(logo_path) as logo_img:
+            liw, lih = logo_img.size
+        logo_w_pt = logo_width_mm * mm
+        logo_h_pt = logo_w_pt * (lih / liw)
+        logo_y = page_h - margin - logo_h_pt
+
         if title_rules:
-            # 下側ラインのY座標（先ほど計算した y_bot を再利用できるようにしておく）
-            # ここでは y_bot を再計算して一致させる（確実）
-            inset = float(title_rule_inset_mm) * mm
             gap_rule = float(title_rule_gap_mm) * mm
             y_bot_local = logo_y - gap_rule
-            top_y = y_bot_local - gap_pt  # 名前欄の上端基準
+            top_y = y_bot_local - gap_pt
         else:
             top_y = logo_y - gap_pt
 
-        right_inset_mm = 2.0  # 右端から少し内側（お好みで）
+        right_inset_mm = 2.0
         name_x = page_w - margin - (right_inset_mm * mm) - nw_pt
         name_y = top_y - nh_pt
-
 
         c.drawImage(
             ImageReader(name_path),
@@ -493,17 +491,6 @@ def generate_polar_maze_with_blank_center(
     return PolarMaze(rings=rings, sectors=sectors, start_ring=start_ring, cells=cells)
 
 
-def _draw_rotated_square(draw: ImageDraw.ImageDraw, x: float, y: float, ang: float, half: float, color):
-    # 放射方向(ang)と接線方向に平行な回転正方形（ジョイント）
-    urx, ury = cos(ang), sin(ang)
-    utx, uty = -sin(ang), cos(ang)
-    p1 = (x + half*urx + half*utx, y + half*ury + half*uty)
-    p2 = (x + half*urx - half*utx, y + half*ury - half*uty)
-    p3 = (x - half*urx - half*utx, y - half*ury - half*uty)
-    p4 = (x - half*urx + half*utx, y - half*ury + half*uty)
-    draw.polygon([p1, p2, p3, p4], fill=color)
-
-
 def render_circular_maze_png(
     maze: PolarMaze,
     *,
@@ -521,7 +508,7 @@ def render_circular_maze_png(
     入口/出口は外周（直径対向がデフォルト）。
     中心は start_ring より内側を空白。
     PNG内にアイコンは貼らない。代わりにアイコン中心座標(px)を返す（PDFで固定mm描画）。
-    return: (img, start_center_px, goal_center_px)
+    return: (img, start_center_px, goal_center_px, (cx,cy))
     """
     R, K, s0 = maze.rings, maze.sectors, maze.start_ring
     if exit_sector is None:
@@ -545,9 +532,6 @@ def render_circular_maze_png(
 
     img = Image.new("RGB", (W, H), bg)
     draw = ImageDraw.Draw(img)
-
-    def p(radius: float, ang: float):
-        return (cx + radius * cos(ang), cy + radius * sin(ang))
 
     def rad_to_deg(a: float) -> float:
         return a * 180.0 / pi
@@ -594,9 +578,18 @@ def render_circular_maze_png(
                 continue
             a0 = 2 * pi * (t / K)
             a1 = 2 * pi * ((t + 1) / K)
-            draw.arc(bbox, start=rad_to_deg(a0) - ddeg, end=rad_to_deg(a1) + ddeg, fill=fg, width=int(lw))
+            draw.arc(
+                bbox,
+                start=rad_to_deg(a0) - ddeg,
+                end=rad_to_deg(a1) + ddeg,
+                fill=fg,
+                width=int(lw),
+            )
 
-    # 放射描画（端のはみ出しを抑える：最外周は外側に伸ばさない）
+    # 放射描画
+    def p(radius: float, ang: float):
+        return (cx + radius * cos(ang), cy + radius * sin(ang))
+
     for r in range(s0, R):
         r0 = blank_extra + r * rt
         r1 = blank_extra + (r + 1) * rt
@@ -604,57 +597,215 @@ def render_circular_maze_png(
             if not radial_wall[r][tb]:
                 continue
             ang = 2 * pi * (tb / K)
-
-            r0_draw = r0
-            r1_draw = r1
-
-            p0 = p(max(0.0, r0_draw), ang)
-            p1 = p(r1_draw, ang)
+            p0 = p(max(0.0, r0), ang)
+            p1 = p(r1, ang)
             draw.line([p0, p1], fill=fg, width=int(lw))
 
-    # # ジョイント（回転正方形）
-    # arc_touch = [[False for _ in range(K)] for __ in range(R + 1)]
-    # rad_touch = [[False for _ in range(K)] for __ in range(R + 1)]
-
-    # for rb in range(s0, R + 1):
-    #     for t in range(K):
-    #         if arc_wall[rb][t]:
-    #             arc_touch[rb][t] = True
-    #             arc_touch[rb][(t + 1) % K] = True
-
-    # for r in range(s0, R):
-    #     for tb in range(K):
-    #         if radial_wall[r][tb]:
-    #             rad_touch[r][tb] = True
-    #             rad_touch[r + 1][tb] = True
-
-    # jhalf = (lw / 2.0) * 0.78
-    # for rb in range(s0, R + 1):
-    #     radius = blank_extra + rb * rt
-    #     for tb in range(K):
-    #         if not (arc_touch[rb][tb] and rad_touch[rb][tb]):
-    #             continue
-    #         ang = 2 * pi * (tb / K)
-    #         x, y = p(radius, ang)
-    #         _draw_rotated_square(draw, x, y, ang, jhalf, fg)
-
-    # --- START/GOAL アイコン中心(px)（PNGに貼らず、PDFで固定mm描画） ---
+    # START/GOAL アイコン中心(px)
     icon_offset = lw * 3  # 外周の少し外
     start_ang = 2 * pi * ((entrance_sector + 0.5) / K)
     goal_ang  = 2 * pi * ((exit_sector + 0.5) / K)
 
-    start_center = (cx + (outer_r + icon_offset) * cos(start_ang),
-                    cy + (outer_r + icon_offset) * sin(start_ang))
-    goal_center  = (cx + (outer_r + icon_offset) * cos(goal_ang),
-                    cy + (outer_r + icon_offset) * sin(goal_ang))
+    start_center = (
+        cx + (outer_r + icon_offset) * cos(start_ang),
+        cy + (outer_r + icon_offset) * sin(start_ang),
+    )
+    goal_center = (
+        cx + (outer_r + icon_offset) * cos(goal_ang),
+        cy + (outer_r + icon_offset) * sin(goal_ang),
+    )
 
     if aa_scale != 1:
         img = img.resize((W // aa_scale, H // aa_scale), resample=Image.Resampling.LANCZOS)
         start_center = (start_center[0] / aa_scale, start_center[1] / aa_scale)
-        goal_center  = (goal_center[0] / aa_scale,  goal_center[1]  / aa_scale)
+        goal_center  = (goal_center[0]  / aa_scale, goal_center[1]  / aa_scale)
 
-    return img, start_center, goal_center, (cx/aa_scale, cy/aa_scale)
+    return img, start_center, goal_center, (cx / aa_scale, cy / aa_scale)
 
+
+# =========================================================
+# 三角形迷路（正三角形タイルグリッド）
+#   全体：上向き正三角形
+#   行 r (0..levels-1) に 2r+1 個（k=0..2r）
+#   k偶数: 上向き△, k奇数: 下向き▽
+#   壁は3方向のみ（左右 + 垂直）
+# =========================================================
+TL, TR, TV = 1, 2, 4  # Left / Right / Vertical
+TOPP = {TL: TR, TR: TL, TV: TV}
+
+
+@dataclass
+class TriMaze:
+    levels: int
+    cells: list  # cells[r][k] : 通路ビット（TL/TR/TV）
+
+
+def generate_tri_maze(levels: int, seed: int | None = None) -> TriMaze:
+    if levels <= 0:
+        raise ValueError("levels must be > 0")
+
+    rnd = random.Random(seed)
+    cells = [[0 for _ in range(2 * r + 1)] for r in range(levels)]
+    visited = [[False for _ in range(2 * r + 1)] for r in range(levels)]
+
+    def is_up(r: int, k: int) -> bool:
+        return (k % 2) == 0
+
+    def neighbors(r: int, k: int):
+        out = []
+        # 左右（同じ行）
+        if k - 1 >= 0:
+            out.append((TL, r, k - 1))
+        if k + 1 <= 2 * r:
+            out.append((TR, r, k + 1))
+
+        # 垂直（上向きは下へ、下向きは上へ）
+        if is_up(r, k):
+            nr, nk = r + 1, k + 1
+            if nr < levels and 0 <= nk <= 2 * nr:
+                out.append((TV, nr, nk))
+        else:
+            nr, nk = r - 1, k - 1
+            if nr >= 0 and 0 <= nk <= 2 * nr:
+                out.append((TV, nr, nk))
+        return out
+
+    stack = [(0, 0)]  # 頂点セルから開始
+    visited[0][0] = True
+
+    while stack:
+        r, k = stack[-1]
+        cand = [(d, nr, nk) for (d, nr, nk) in neighbors(r, k) if not visited[nr][nk]]
+        if not cand:
+            stack.pop()
+            continue
+
+        d, nr, nk = rnd.choice(cand)
+        cells[r][k] |= d
+        cells[nr][nk] |= TOPP[d]
+        visited[nr][nk] = True
+        stack.append((nr, nk))
+
+    return TriMaze(levels=levels, cells=cells)
+
+
+def render_tri_maze_png(
+    maze: TriMaze,
+    *,
+    cell_size: int = 36,     # 一辺(px)
+    margin: int = 30,
+    line_width: int = 5,
+    aa_scale: int = 3,
+    bg=(255, 255, 255),
+    fg=(0, 0, 0),
+):
+    """
+    return: (img, start_center_px, goal_center_px, start_outward_unit, goal_outward_unit)
+    """
+    import math
+
+    levels = maze.levels
+    s = cell_size * aa_scale
+    mg = margin * aa_scale
+    lw = line_width * aa_scale
+    h = s * math.sqrt(3) / 2.0  # 正三角形の高さ
+
+    total_w = mg * 2 + levels * s
+    total_h = mg * 2 + levels * h
+
+    W = int(math.ceil(total_w))
+    H = int(math.ceil(total_h))
+
+    img = Image.new("RGB", (W, H), bg)
+    draw = ImageDraw.Draw(img)
+
+    def is_up(r: int, k: int) -> bool:
+        return (k % 2) == 0
+
+    def tri_vertices(r: int, k: int):
+        y_top = mg + r * h
+        x_left = mg + (levels - 1 - r) * (s / 2.0) + k * (s / 2.0)
+
+        if is_up(r, k):
+            # 上向き△: 左下, 上, 右下
+            v0 = (x_left,         y_top + h)
+            v1 = (x_left + s/2.0, y_top)
+            v2 = (x_left + s,     y_top + h)
+        else:
+            # 下向き▽: 左上, 右上, 下
+            v0 = (x_left,         y_top)
+            v1 = (x_left + s,     y_top)
+            v2 = (x_left + s/2.0, y_top + h)
+        return v0, v1, v2
+
+    # 入口/出口：最下段の左端/右端（どちらも上向き△）
+    start_cell = (1, 0)
+    goal_cell  = (levels - 1, 2 * (levels - 1))
+
+    # 迷路壁描画（通路があればその辺は描かない）
+    for r in range(levels):
+        for k in range(2 * r + 1):
+            v0, v1, v2 = tri_vertices(r, k)
+            bits = maze.cells[r][k]
+
+            if is_up(r, k):
+                # TL: v1-v0, TR: v1-v2, TV(下): v0-v2
+                if not (bits & TL):
+                    draw.line([v1, v0], fill=fg, width=int(lw))
+                if not (bits & TR):
+                    draw.line([v1, v2], fill=fg, width=int(lw))
+                if not (bits & TV):
+                    draw.line([v0, v2], fill=fg, width=int(lw))
+            else:
+                # TL: v0-v2, TR: v1-v2, TV(上): v0-v1
+                if not (bits & TL):
+                    draw.line([v0, v2], fill=fg, width=int(lw))
+                if not (bits & TR):
+                    draw.line([v1, v2], fill=fg, width=int(lw))
+                if not (bits & TV):
+                    draw.line([v0, v1], fill=fg, width=int(lw))
+
+    # 入口/出口の穴：境界辺を「白で消す」（見た目穴）
+    hole_w = int(lw * 3.0)  # ← ここを 2.5〜4.0 で調整（大きくしたいなら増やす）
+
+    def boundary_edge_and_out(cell, side: str):
+        r, k = cell
+        v0, v1, v2 = tri_vertices(r, k)
+
+        if side == "left":
+            pts = sorted([v0, v1, v2], key=lambda p: p[0])
+            a, b = pts[0], pts[1]  # 左側の辺
+            out = (-1.0, 0.0)
+        elif side == "right":
+            pts = sorted([v0, v1, v2], key=lambda p: p[0], reverse=True)
+            a, b = pts[0], pts[1]  # 右側の辺
+            out = (1.0, 0.0)
+        else:
+            raise ValueError("side must be 'left' or 'right'")
+
+        mx, my = (a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0
+        return (a, b), (mx, my), out
+    
+    # start: 左辺の辺を消す
+    (start_a, start_b), (smx, smy), start_out = boundary_edge_and_out(start_cell, "left")
+    draw.line([start_a, start_b], fill=bg, width=hole_w)
+
+    # goal: 右辺の辺を消す
+    (goal_a, goal_b), (gmx, gmy), goal_out = boundary_edge_and_out(goal_cell, "right")
+    draw.line([goal_a, goal_b], fill=bg, width=hole_w)
+
+    # アイコン中心（穴の中点から外へ）
+    icon_offset = lw * 6
+    start_center = (smx + start_out[0] * icon_offset, smy + start_out[1] * icon_offset)
+    goal_center  = (gmx + goal_out[0]  * icon_offset, gmy + goal_out[1]  * icon_offset)
+
+
+    if aa_scale != 1:
+        img = img.resize((W // aa_scale, H // aa_scale), resample=Image.Resampling.LANCZOS)
+        start_center = (start_center[0] / aa_scale, start_center[1] / aa_scale)
+        goal_center  = (goal_center[0]  / aa_scale, goal_center[1]  / aa_scale)
+
+    return img, start_center, goal_center, start_out, goal_out
 
 
 # =========================================================
@@ -663,7 +814,7 @@ def render_circular_maze_png(
 def main():
     ap = argparse.ArgumentParser()
 
-    ap.add_argument("--shape", choices=["rect", "circle"], default="rect")
+    ap.add_argument("--shape", choices=["rect", "circle", "tri"], default="rect")
     ap.add_argument("--seed", type=int, default=None)
 
     # 共通出力
@@ -694,8 +845,18 @@ def main():
     ap.add_argument("--entrance-sector", type=int, default=24)
     ap.add_argument("--exit-sector", type=int, default=None)
 
+    # 三角迷路パラメータ
+    ap.add_argument("--tri-levels", type=int, default=18)
+    ap.add_argument("--tri-cell", type=int, default=64)
+    ap.add_argument("--tri-margin", type=int, default=30)
+    ap.add_argument("--tri-line-width", type=int, default=5)
+    ap.add_argument("--tri-aa", type=int, default=3)
+
     args = ap.parse_args()
+
     maze_center = None
+    start_outward_unit = None
+    goal_outward_unit = None
 
     if args.shape == "rect":
         m = generate_rect_maze(args.width, args.height, seed=args.seed)
@@ -710,7 +871,11 @@ def main():
             exit=(args.width - 1, args.height - 1),
             exit_side="right",
         )
-    else:
+        # rectは左側へ押し出す（既存方針）
+        start_outward_unit = (-4.0, 0.0)
+        goal_outward_unit = (-4.0, 0.0)
+
+    elif args.shape == "circle":
         blank_ratio = max(0.0, min(0.9, args.blank_ratio))
         start_ring = int(round(args.rings * blank_ratio))
         start_ring = min(max(0, start_ring), args.rings - 1)
@@ -732,6 +897,19 @@ def main():
             exit_sector=args.exit_sector,
             blank_extra_px=args.blank_extra,
         )
+        # circleはcenterからの外向きをPDF側で計算
+        start_outward_unit = None
+        goal_outward_unit = None
+
+    else:  # tri
+        tm = generate_tri_maze(args.tri_levels, seed=args.seed)
+        img, start_center, goal_center, start_outward_unit, goal_outward_unit = render_tri_maze_png(
+            tm,
+            cell_size=args.tri_cell,
+            margin=args.tri_margin,
+            line_width=args.tri_line_width,
+            aa_scale=args.tri_aa,
+        )
 
     # PNG保存
     img.save(args.out)
@@ -742,7 +920,6 @@ def main():
     if pdf_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         pdf_path = f"maze_{args.shape}_{ts}.pdf"
-    rect_icon_outward = (-4.0, 0.0) if args.shape == "rect" else None
 
     save_image_as_a4_pdf(
         img,
@@ -752,15 +929,16 @@ def main():
         goal_icon_path=args.goal_icon,
         start_center_px=start_center,
         goal_center_px=goal_center,
-        maze_center_px=maze_center,
+        maze_center_px=maze_center,          # circleのみ有効
         icon_mm=args.icon_mm,
         logo_path="image/logo.png",
-        logo_width_mm=120.0, 
-        start_outward_unit=rect_icon_outward,  # circle: None -> use radial outward direction
-        goal_outward_unit=rect_icon_outward,   # circle: None -> use radial outward direction
+        logo_width_mm=120.0,
+        start_outward_unit=start_outward_unit,  # rect/tri: unit指定, circle: None
+        goal_outward_unit=goal_outward_unit,
         bottom_art_path="image/animal.png",
         bottom_art_width_mm=170.0,
         bottom_art_y_mm=10.0,
+        name_path="image/name.png",
         name_width_mm=120.0,
         name_gap_mm=10.0,
     )
